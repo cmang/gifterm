@@ -1,0 +1,1101 @@
+#!/usr/bin/python2
+
+# gifterm
+# by indy joenz
+
+# this thing needs colorama and PIL (or, preferably, Pillow) python modules.
+# You can probably install them with: 
+#
+# easy_install pillow
+# easy_install colorama
+#
+# or:
+# pip install pillow
+# pip install colorama
+
+# it would be cool to refactor all of this into a solid toolkit (classes).
+
+import argparse, codecs, glob, locale, os, platform, random
+import select, signal, sys, textwrap, threading, time
+
+import colorama
+from colorama import Fore, Back, Style
+from PIL import Image 
+from PIL import ImageOps
+
+class GifAsciiModel:    # Store data and data state here.
+    """ Load gif files, provde interface to gif files for controller.
+    """
+    def __init__(self):
+        pass
+
+class GifAsciiView:     
+    """ methods for turning GifAsciiModel interface into pretty colors. """
+    def __init__(self):
+        pass
+    
+class GifAsciiController:
+    """ Stuff for controlling playback, which frame we're at, etc.
+        intermediary between model and view.
+    """
+    def __init__(self):
+        pass
+
+def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to play
+    # ibm-pc style block characters
+    # 'f1':176, 'f2':177, 'f3':178, 'f4':219, 'f5':223, 'f6':220, 'f7':221, 'f8':222, 'f9':254, 'f10':250 
+    app.chars = app.currCharSet[0]
+    app.chars = app.chars[::-1]
+    app.fileName = inGif
+    print "Loading " + inGif + "... "
+    app.gifstats = analyseGif(inGif)
+    #if app.gifstats is False:
+    #    print "Could not open " + inGif
+    #    time.sleep(2)
+    #    nextFile()
+    #    return False
+    try: 
+        frame = Image.open(inGif)
+    except IOError:
+        print "Could not open " + inGif
+        time.sleep(2)
+        nextFile()
+        return False
+    except ValueError:
+        print "Could not open " + inGif
+        time.sleep(2)
+        nextFile()
+        return False
+    app.gifmode = app.gifstats['mode']
+    app.sleeptime = 0.0
+    app.frame = frame
+    #clear_console = 'clear' if os.name == 'posix' else 'CLS'
+    if app.platform == "Windows":
+        app.rows, app.cols = getTerminalSizeWindows()
+    else:
+        app.rows, app.cols = os.popen('stty size', 'r').read().split()
+    app.rows = int(app.rows)
+    app.cols = (int(app.cols) / 2)
+    try:    # unix
+        signal.signal(signal.SIGWINCH, resizeHandler)
+    except:     # windows
+        pass
+    #frame.thumbnail((cols - 1, rows - 1), Image.ANTIALIAS)
+    #frame = frame.convert('RGB')
+    app.mypalette = frame.getpalette()
+    #lastframe = frame.convert('RGBA')
+    #framec = frame.copy()
+    # start user input thread
+    #return
+    app.frameNum = 0
+    app.playcount = 0
+    if app.gifstats['framecount'] in [0, -1]:   # not a movie
+        app.playing = False
+    else:
+        app.playing = True
+    if app.outputToFile:
+        try:
+            if app.unicodeEnabled:
+                outFile = codecs.open(app.outFileName, "a", "utf-8")
+            else:
+                outFile = open(app.outFileName, "a")
+        except:
+            print "Could not open file for writing."
+            exit(1)
+    # start spitting out characters.
+    if app.outputToTerminal:
+        print "\033[2J" # clear the screen
+        #print "Loading " + inGif + "... "
+        if app.playing == False:
+            renderFrame()
+    if app.outputToFile:
+        sys.stdout.write("Writing to " + app.outFileName + " ...\n")
+        outFile.write("\033[2J")
+    while app.frame:
+        while app.playing:
+            # "If the GIF uses local colour tables, each frame will have its own palette.
+            # If not, we need to apply the global palette to the new frame."
+            if app.outputToTerminal:
+                renderFrame()
+                #time.sleep(0.01)
+                time.sleep(app.delay)
+                if not app.fastMode:
+                    try:
+                        sleeptime = app.frame.info['duration'] * 0.001
+                        if sleeptime <= 0.0:
+                            sleeptime = 0.04
+                        #print str(sleeptime),
+                        #time.sleep(sleeptime)
+                    except:
+                        sleeptime = 0.04
+                    app.sleeptime = sleeptime
+                    time.sleep(sleeptime)
+            if app.outputToFile:
+                renderFrame(outFile=outFile)
+                renderFrame(outFile=outFile)
+                percentage = (float(app.frame.tell()) / (app.gifstats['framecount'] - 1))
+                percentage *= 100
+                percentage = int(percentage)
+                sys.stdout.write("\033[1K")    # clear line
+                sys.stdout.write("\033[40D")    # cursor back 40 columns
+                sys.stdout.write(str(percentage) + "% .. ")
+                sys.stdout.write(str(app.frame.tell()) + "/" + str((app.gifstats['framecount'] - 1)))
+            #time.sleep(0.5)
+            if app.playing:
+                nextFrame()
+            if app.running == False:
+                return
+            if (app.playcount == playtimes) and (playtimes != 0):
+                app.playing = False
+                if app.outputToFile and outFile:
+                    sys.stdout.write("\nDone.\n")
+                    outFile.close()
+                    outFile = None
+                return
+        if app.running == False:
+            return
+        time.sleep(0.01)
+        #return True
+
+def nextFile():
+    app.playing = False
+    time.sleep(0.5)
+    if app.currentFileIndex == len(app.fileList) - 1:   # last file in list
+        app.currentFileIndex = 0
+    else:
+        app.currentFileIndex += 1
+    app.fileName = app.fileList[app.currentFileIndex]
+    app.frame = None
+
+def prevFile():
+    app.playing = False
+    time.sleep(0.5)
+    if app.currentFileIndex == 0:   # first file in list
+        app.currentFileIndex = len(app.fileList) - 1
+    else:
+        app.currentFileIndex -= 1
+    app.fileName = app.fileList[app.currentFileIndex]
+    app.frame = None
+
+def randFile():
+    app.playing = False
+    time.sleep(0.5)
+    app.currentFileIndex = random.randrange(0, len(app.fileList))
+    app.fileName = app.fileList[app.currentFileIndex]
+    app.frame = None
+
+def firstFrame():
+    app.frameNum = 0
+    app.frame.seek(app.frameNum)
+
+def lastFrame():
+    #print "\033[" + str(app.rows) + "," + str(app.cols) + "H", # move to cursor position 0,0
+    print "\033[" + str(app.rows) + "," + "0" + "H", # move to cursor position 0,0
+    #sys.stdout.write("* Working * ")
+    if not (app.frame.tell() == app.gifstats['framecount']):
+        newFrameNum = app.gifstats['framecount'] - 1
+        tempFrameNum = app.frame.tell()
+        while tempFrameNum < newFrameNum:
+            tempFrameNum += 1
+            app.frame.seek(tempFrameNum)
+        app.frameNum = app.frame.tell()
+
+def nextFrame():
+    app.frameNum += 1
+    try:
+        app.frame.seek(app.frameNum)
+        #frame.palette.dirty = 1     # workaround for PIL bug where seek()
+        #frame.palette.rawmode = "RGB"   # doesn't carry over GIF palette?
+    except EOFError:
+        if app.playing:
+            #if app.frame.tell() == 0:
+                #app.playing = False
+                #time.sleep(0.2)
+                #refreshScreen()
+            #else:
+            #    app.playcount += 1
+            app.playcount += 1
+        #break;
+        app.frameNum= 0
+        app.frame.seek(app.frameNum)
+
+def prevFrame():
+    #print "* Working * ",
+    #sys.stdout.write("* Working * ")
+    oldFrameNum = app.frame.tell() #app.frameNum
+    if app.frameNum == 0:   # firs frame, so cycle over to last
+        newFrameNum = app.gifstats['framecount']
+        tempFrameNum = app.frameNum
+        while tempFrameNum < newFrameNum:
+            #print "newframe:" + str(newFrameNum) + " tempframe:" + str(tempFrameNum) + '\n'
+            #print "gif framecount: " + str(app.gifstats['framecount'])
+            app.frame.seek(tempFrameNum)
+            tempFrameNum += 1
+            #exit()
+    else:   # not the first frame
+        newFrameNum = oldFrameNum
+        tempFrameNum = 0
+        app.frame.seek(tempFrameNum)
+        while tempFrameNum != newFrameNum:
+            app.frame.seek(tempFrameNum)
+            tempFrameNum += 1
+    #app.frameNum = tempFrameNum
+    app.frameNum = app.frame.tell()
+
+def renderFrame(outFile = None):
+    outstr = ''
+    #clearchar = "\033[25A"    # 25 == number of lines to move up
+    #clearchar = "\033[2J"
+    #clearchar = "\033[0,0H" # move to cursor position 0,0
+    if app.platform == "Windows":
+        #clearchar = "\033[2J\033[1;1f"  # actual clear screen
+        clearchar = "\033[1;1H" # move to cursor position 0,0
+        #clearchar = "\033b[" + str(app.rows) + "A" # move to cursor position 0,0
+    else:
+        clearchar = "\033[0H" # move to cursor position 0,0
+    statusBarFormatted = ""
+    framec = app.frame.copy()
+    framec = framec.convert('RGBA')
+    lastframe = Image.new('RGBA', framec.size)
+    lastframe.paste(framec, (0,0), framec.convert('RGBA'))
+    #if not app.frame.getpalette():
+    #    framec.putpalette(app.mypalette)
+    newframe = Image.new('RGBA', framec.size)
+    # "Is this file a "partial"-mode GIF where frames update a region of a different size to the entire image?
+    # If so, we need to construct the new frame by pasting it on top of the preceding frames."
+    if app.gifmode == 'partial':
+        newframe.paste(lastframe, (0,0))
+    #newframe.paste(framec, (0,0), framec.convert('RGBA'))
+    newframe.paste(framec, (0,0))   # this doesn't seem to preserve transparency mask
+    lastframe = newframe
+    if app.displayInfo:
+        statusBarString = "frame: " + str(app.frame.tell()) + '/' + str(app.gifstats['framecount'] - 1) + ', mode: ' + app.gifmode + \
+            ", frame delay: " + str(app.sleeptime) + \
+            ", set: " + str(app.setNum) + ', brightness: ' + str(app.delta) + \
+            ", smoothing: " + str(app.smoothing) + ", playing: " + str(app.playing) + \
+            ", inverse: " + str(app.inverted) + ", mono: " + str(not app.colorEnabled) + \
+            ", extra delay: " + str(app.delay) + ", hicolor: " + str(app.hiColorEnabled) + \
+            ", fastmode: " + str(app.fastMode)
+        statusBarString += ", name: " + app.fileName + '      '
+        statusBarFormatted = textwrap.wrap(statusBarString, (app.cols * 2) - 2)
+        statusBarSize = len(statusBarFormatted) - 1
+    if app.smoothing:
+        if app.displayInfo:
+            newframe.thumbnail((app.cols, app.rows - statusBarSize), Image.ANTIALIAS)
+        else:
+            newframe.thumbnail((app.cols, app.rows), Image.ANTIALIAS)
+    else:
+        if app.displayInfo:
+            newframe.thumbnail((app.cols, app.rows - statusBarSize), Image.NEAREST)
+        else:
+            newframe.thumbnail((app.cols, app.rows), Image.NEAREST)
+    #newframe.save( '%s/%s-%s.gif' % ('.', os.path.basename(inGif), frameNum) , 'GIF')
+    rgbframe = newframe.convert('RGB')
+    if app.inverted:
+        rgbframe = ImageOps.invert(rgbframe)
+    #rgbframe.show()
+    #rgbframe = newframe
+    #for x in range(1, frame.size[0]):
+    #    for y in range(1, frame.size[1]):
+    outstr = clearchar
+    #outstr += '\n'
+    if not app.colorEnabled:    # monochrome    
+        outstr += Fore.WHITE
+    elif not app.hiColorEnabled:    # 16-color mode
+        if app.debugEnabled:
+            dbg.dprint("Setting 8 color palette - running quantize().")
+        #rgbframe = rgbframe.quantize(palette=app.cgaPalette)
+        #rgbframe = rgbframe.convert("P", palette=app.cgaPalette, colors=8)
+        #rgbframe = rgbframe.convert("RGB")
+        if app.debugEnabled:
+            dbg.dprint("Done.")
+    pix = rgbframe.load()
+    for y in range(1, newframe.size[1]):
+        for x in range(1, newframe.size[0]):
+            #print pix[x, y]
+            pixel = sum(pix[x, y])
+            if app.colorEnabled:
+                if app.hiColorEnabled:
+                    #pixColor = pickHiColorFrom(pix[x, y])
+                    pixColor = pickHiColor(pix[x, y])
+                else:
+                    #pixColor = pickLoColor(pix[x, y])
+                    pixColor = oldpickLoColor(pix[x, y])
+                    #pixColor = newPickColorFrom(pix[x, y])
+                outstr += pixColor
+            # mathemagic \/
+            pixcharnum = (pixel * (len(app.chars) + app.delta) / 255) / len(app.chars)
+            if pixcharnum > len(app.chars) - 1:
+                pixcharnum = len(app.chars) - 1    # prevent overflow
+            if pixcharnum < 0:
+                pixcharnum = 0
+            pixchar = app.chars[pixcharnum]
+            try:
+                outstr += pixchar + pixchar
+            except UnicodeDecodeError:
+                app.toggleUnicode()
+                pixchar = app.chars[pixcharnum]
+                outstr += pixchar + pixchar
+            #outstr += app.chars[(pixel * (len(app.chars) + app.delta) / 255) / len(app.chars)]
+            # Subtract from app.delta here \/ for dithering.
+            #outstr += app.chars[(pixel * (len(app.chars) + app.delta) / 255) / len(app.chars)]
+        if y < newframe.size[1] - 1:
+            #outstr += Fore.WHITE + '\n'
+            outstr += '\n'
+        #outstr += '\n'
+    if outFile:
+        outFile.write(outstr)
+        outFile.write(Fore.RESET + '\n')
+    if app.outputToTerminal:
+        sys.stdout.write(outstr)
+        sys.stdout.write(Fore.WHITE + '\n')
+    if app.displayInfo:
+        sys.stdout.write("\n".join(statusBarFormatted))
+    #print "\033[0,0H" # move to cursor position 0,0
+    #print("\033[6N"), # move backward 6 columns
+    #sys.stdout.write(str(nframes))
+    #sys.stdout.write(str((rows, cols)))
+    sys.stdout.flush()
+
+def pickHiColor(rgb):
+    """ Converts RGB values to the nearest equivalent xterm-256 color.
+        function written by TerrorBite. Heaps faster than x256.py.
+    """
+    # Default color levels for the color cube
+    #cubelevels = [0x00, 0x5f, 0x87, 0xaf, 0xd7, 0xff]
+    # Generate a list of midpoints of the above list
+    #snaps = [(x+y)/2 for x, y in zip(cubelevels, [0]+cubelevels)[1:]]
+    # shortcut version - above generates a list, but I think a tuple == faster?
+    snaps = (47, 115, 155, 195, 235)
+    r, g, b = rgb
+    # Using list of snap points, convert RGB value to cube indexes
+    r, g, b = map(lambda x: len(tuple(s for s in snaps if s<x)), (r, g, b))
+    # Simple colorcube transform
+    cnum = r*36 + g*6 + b + 16
+    code = "\033[38;5;" + str(cnum) + "m"
+    return code
+
+def newPickColorFrom(rgb):
+    from colorlist import colorNameFromRGB
+    color = colorNameFromRGB(rgb)
+    if color == 'red':
+        return Fore.RED
+    if color == 'green':
+        return Fore.GREEN
+    if color == 'blue':
+        return Fore.BLUE
+    if color == 'cyan':
+        return Fore.CYAN
+    if color == 'magenta':
+        return Fore.MAGENTA
+    if color == 'yellow':
+        return Fore.YELLOW
+    if color == 'white':
+        return Fore.WHITE
+    if color == 'black':
+        return Fore.BLACK
+    
+def pickLoColor(rgb):
+    """ Expects an rgb value Image.quantize()'d to 8 color. why 8 and not 16?
+        because a lot of unix terminals suck at bold colors.
+    """
+    r, g, b = rgb
+    if app.debugEnabled:
+        dbg.dprint(str(rgb))
+#    if (r < 50 and g > 50 and b >= 50):
+#        return Fore.BLUE
+    if (r >= 50 and g >= 50 and b >= 50):
+        if r - g + b < 10:
+            return Fore.WHITE
+    if (b + b > r + g + 25):
+        return Fore.BLUE
+    if (r < 50 and g >= 50 and b >= 50):
+        return Fore.CYAN
+    if (r < 50 and g >= 50 and b < 50):
+        return Fore.GREEN
+    if (r >= 50 and g < 50 and b < 50):
+        return Fore.RED
+    if (r >= 50 and g >= 50 and b < 50):
+        return Fore.YELLOW
+    if (r >= 50 and g < 50 and b >= 50):
+        return Fore.MAGENTA
+    return Fore.WHITE
+
+def oldpickLoColor(rgb):
+    """ Take in (r, g, b) where value == 0-255, return colorama ANSI escape shorthands
+    """
+    r, g, b = rgb
+    #r += 50
+    #g += 50
+    #b += 50
+    #if (r >= 128) and (g < 128) and (b < 128):
+    #    return Fore.RED
+    #elif (r < 128) and (g > 128) and (b < 128):
+    #    return Fore.GREEN
+    #elif (r < 128) and (g < 128) and (b > 128):
+    #    return Fore.BLUE  
+    if ((r - g) < 5) and ((g - b) < 5) and ((b - g) < 5):
+        if (r > 100):
+            return Style.BRIGHT + Fore.WHITE + Style.NORMAL
+        else:
+            return Fore.WHITE
+    if (r < 10) and (g > 20) and (b > 20):
+            if (g > 100) and (b > 100):
+                #return Style.BRIGHT + Fore.CYAN + Style.NORMAL
+                return Fore.CYAN
+            else:
+                return Fore.CYAN
+    #if (r >= 160) and (g >= 160) and (b >= 160):
+    #    return Fore.WHITE
+    elif (b > g) and (r > g):
+        return Fore.MAGENTA
+    elif (r > g) and (g > b):
+        return Fore.YELLOW
+    elif (r > g) and (r > b):
+        return Fore.RED
+    elif (g > b) and (g > r) and (g - b < 10):
+        return Fore.GREEN
+    elif (b > g) and (b > r):
+        return Fore.BLUE
+    elif (b > g) and (g > r):
+        return Fore.CYAN
+    else:
+        return Fore.WHITE
+    pass
+
+class _Getch:
+    """Gets a single character from standard input.  Does not echo to the
+screen."""
+    def __init__(self):
+        try:
+            self.impl = _GetchWindows()
+        except ImportError:
+            self.impl = _GetchUnix()
+
+    def __call__(self): return self.impl()
+
+
+class _GetchUnix:
+    def __init__(self):
+        import tty, sys, termios
+
+    def __call__(self):
+        import sys, tty, termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            #tty.setraw(sys.stdin.fileno()) # breaks output, so instead...
+            tty.setcbreak(sys.stdin.fileno())
+            ch = sys.stdin.read(1)
+            #sys.stdin.stream.flush()
+        finally:
+        #    pass
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
+
+class _GetchWindows:
+    def __init__(self):
+        import msvcrt
+
+    def __call__(self):
+        import msvcrt
+        return msvcrt.getch()
+
+def getTerminalSizeWindows():
+    #return 80, 25
+    from ctypes import windll, create_string_buffer
+    # stdin handle == -10
+    # stdout handle == -11
+    # stderr handle == -12
+    h = windll.kernel32.GetStdHandle(-12)
+    csbi = create_string_buffer(22)
+    res = windll.kernel32.GetConsoleScreenBufferInfo(h, csbi)
+
+    if res:
+        import struct
+        (bufx, bufy, curx, bury, wattr,
+            left, top, right, bottom, maxx, maxy) = struct.unpack("hhhhHhhhhhh", csbi.raw)
+        sizex = right - left + 1
+        sizey = bottom - top + 1
+    else:
+        sizex, sizey = 80, 25   # can't determine actual size, so 80x25 default
+    return sizey, sizex
+
+
+# from BigglesZX - fix for annoying bits with gifs
+def analyseGif(path):
+    '''
+    Pre-process pass over the image to determine the mode (full or additive).
+    Necessary as assessing single frames isn't reliable. Need to know the mode 
+    before processing all frames.
+    '''
+    try:
+        im = Image.open(path)
+    except ValueError:
+        return False
+    except IOError:
+        return False
+    results = {
+        'size': im.size,
+        'mode': 'full',
+        'framecount': 0,
+    }
+    try:
+        while True:
+            if im.tile:
+                tile = im.tile[0]
+                update_region = tile[1]
+                update_region_dimensions = update_region[2:]
+                if update_region_dimensions != im.size:
+                    results['mode'] = 'partial'
+                    break
+            im.seek(im.tell() + 1)
+            #results['framecount'] += 1
+    except EOFError:
+        #results['framecount'] = im.tell()
+        pass
+    # count frames
+    try:
+        im.seek(0)
+        while True:
+            im.seek(im.tell() + 1)
+            #results['framecount'] += 1
+    except EOFError:
+        results['framecount'] = im.tell()
+        pass
+    return results
+
+class AppState():
+    def __init__(self):
+        self.playTimes = 0    # = infinine loop
+        self.running = False
+        self.playing = False
+        self.delay = 0.00
+        self.platform = platform.system()
+        self.sleeptime = 0.0
+        self.fastMode = False
+        self.smoothing = True
+        self.inverted = False
+        self.displayInfo = False
+        self.colorEnabled = True
+        if self.platform == "Windows":
+            self.colorEnabled = False
+        self.hiColorEnabled = False
+        self.hiColorSupported = False
+        self.unicodeEnabled = False
+        self.outputToFile = False
+        self.outputToTerminal = True
+        self.outFileName = None
+        self.rows = None
+        self.cols = None
+        self.fileList = []
+        self.fileName = None
+        self.pwd = '.'
+        self.oldcwd = None
+        self.charSets = {    # tuple (characters, delta)
+            0:(('M', 'M', 'X', 'H', '$', 'S', 'I', 'i', ';', ':', ' '), 20),
+            1:(('M', 'H', 'S', 'X', 'I', 'i', ';', ':'), 10),
+            2:((chr(219), chr(178), chr(177), chr(176), ' '), 3), # ibm-pc
+            3:((chr(219), chr(178), chr(177), chr(176), ' '), 20),
+            4:(('M', 'S', 'I', 'i', ':', ' '), 20),
+            5:(('#', '@', '%', ';', '.', ' '), 3)
+        }
+        self.cgaColors = [
+            170, 170, 170,  # white
+            0, 0, 170,      # blue 
+            0, 170, 170,    # cyan 
+            170, 0, 0,      # red   
+            0, 0, 0,        # black
+            0, 170, 0,      # green
+            170, 85, 0,     # yellow
+            170, 0, 170     # magenta
+        ]
+        self.cgaPalette = Image.new("P", (1, 1), 0)
+        self.cgaPalette.putpalette(self.cgaColors)
+        self.setNum = 0
+        self.currCharSet = self.charSets[0]
+        self.chars = self.currCharSet[0]
+        self.chars = self.chars[::-1]
+        self.delta = self.currCharSet[1]
+        self.gifmode = None
+        self.gifstats = None
+        self.mypalette = None
+        self.frameNum = None
+        self.debugEnabled = False
+        self.hiColorSupported = True
+        #try:
+        #    global x256
+        #    import x256
+        #    self.hiColorSupported = True
+        #except ImportError:
+        #    self.hiColorSupported = False
+        if self.platform not in ["Windows", "Linux", "Unix"]:
+            app.platform = "Linux"  # act like OS == Linux if I don't recognize it.
+        else:
+            sys.stdout.write(Fore.WHITE)
+            sys.stdout.write(Back.BLACK)
+        sys.stdout.write(Back.BLACK)
+        self.encodingGuess = locale.getpreferredencoding()
+        if self.encodingGuess in ['UTF-8']:    # can be overridden from command line argument
+            self.enableUnicode()
+            self.charEncoding = 'UTF-8'
+        else:
+            self.disableUnicode()
+            self.charEncoding = 'ASCII'
+        time.sleep(3)
+    def enableUnicode(self):
+        self.charSets[2] = ((u'\u2588', u'\u2593', u'\u2592', u'\u2591', ' '), 3)
+        self.charSets[3] = ((u'\u2588', u'\u2593', u'\u2592', u'\u2591', ' '), 15)
+        self.unicodeEnabled = True
+        self.setCharSet(self.setNum)
+    def disableUnicode(self):
+        self.charSets[2] = ((chr(219), chr(178), chr(177), chr(176), ' '), 3)
+        self.charSets[3] = ((chr(219), chr(178), chr(177), chr(176), ' '), 20)
+        self.unicodeEnabled = False
+        self.setCharSet(self.setNum)
+    def toggleUnicode(self):
+        if self.unicodeEnabled:
+            self.disableUnicode()
+        else:
+            self.enableUnicode()
+    def setPlayTimes(self, times):
+        self.playTimes = times
+    def setCharSet(self, setnum):
+        self.currCharSet = self.charSets[setnum]
+        self.chars = self.chars[::-1]
+        self.delta = self.currCharSet[1]
+        self.setNum = setnum
+    def addCharSet(self, chars, delta):
+        newSetNum = len(self.charSets)
+        self.charSets[newSetNum] = (tuple(chars), delta)
+        return newSetNum
+    def prevCharSet(self):
+        if self.setNum == 0:
+            self.setNum = len(self.charSets) - 1
+        else:
+            self.setNum -= 1
+        self.setCharSet(self.setNum)
+        self.chars = self.currCharSet[0]
+        self.chars = self.chars[::-1]
+    def nextCharSet(self):
+        if self.setNum == len(self.charSets) - 1:
+            self.setNum = 0
+        else:
+            self.setNum += 1
+        self.setCharSet(self.setNum)
+        self.chars = self.currCharSet[0]
+        self.chars = self.chars[::-1]
+    def scanForFiles(self):
+        filelist = []
+        # took xpm off of the list because PIL == super buggy with xpm.
+        for filetype in ['jpg', 'png', 'gif', 'jpeg', 'tiff', 'tif', \
+            'bmp', 'ppm', 'dcx', 'pcx', 'psd', 'xbm']: 
+            #filelist += glob.glob(self.pwd + '/*.' + filetype)
+            filelist += glob.glob('*.' + filetype)
+        filelist = sorted(filelist, key=str.lower)
+        self.fileList = filelist
+        if self.fileName:
+            if app.debugEnabled:    
+                print filelist
+            try:
+                self.currentFileIndex = filelist.index(self.fileName)
+            except ValueError:
+                return False
+        elif not self.fileList: # empty list
+            return False
+        else:
+            self.currentFileIndex = 0
+            print str(self.fileList)
+            self.fileName = self.fileList[self.currentFileIndex]
+    def setFileList(self, filelist):
+        self.fileList = filelist
+        self.currentFileIndex = 0
+        self.fileName = self.fileList[self.currentFileIndex]
+    def setPwd(self, pwd):
+        self.pwd = pwd
+    
+
+def resizeHandler(signum, frame):
+    clearScreen()
+    app.rows, app.cols = os.popen('stty size', 'r').read().split()
+    app.rows = int(app.rows)
+    app.cols = (int(app.cols) / 2)
+    #print "resize-window signal caught " + str(app.rows) + " " +str(app.cols)
+    if not app.playing:
+        #renderFrame()
+        refreshScreen()
+    else:
+        time.sleep(0.01)
+        refreshScreen()
+
+def clearScreen():
+    if app.platform == "Windows":
+        print "\033[2J\033[1;1f"
+    else:
+        print "\033[2J" # clear the screen
+
+class InputThread(threading.Thread):
+
+    def __init__(self, name='TestThread', app=None):
+        self.app = app
+        self._stopevent = threading.Event()
+        threading.Thread.__init__(self, name=name)
+        # echo off
+        #print "\033[12h"
+
+    def join(self, timeout=None):
+        """ stop the thread. """
+        self._stopevent.set()
+        threading.Thread.join(self, timeout)
+        # echo on
+        #print "\033[12l"
+
+    def run(self):
+        #getch = _Getch()    # picks unix or windows version
+        waitingForInput = True
+        app = self.app
+        while waitingForInput:
+            if not app.running:
+                waitingForInput = False
+                return
+            c = getch()[0]
+            if c:
+                if c == 'q':
+                    waitingForInput = False
+                    app.running = False
+                    return 
+                elif c == 'c':  # c - next charset
+                    app.nextCharSet()
+                    if app.playing == False:
+                        renderFrame()
+                elif c == 'U':  # U - toggle Utf8 encoding
+                    app.toggleUnicode()
+                    app.prevCharSet()
+                    app.nextCharSet()
+                    clearScreen()
+                    if app.playing == False:
+                        renderFrame()
+                elif c == 'C':  # M - prev charset
+                    app.prevCharSet()
+                    if app.playing == False:
+                        renderFrame()
+                elif c == 'b':  # b - brighter
+                    if app.delta < 100:
+                        app.delta += 1
+                    if app.playing == False:
+                        renderFrame()
+                elif c == 'B':  # B - dimmer
+                    if app.delta > -5:
+                        app.delta -= 1
+                    if app.playing == False:
+                        renderFrame()
+                elif c == 's':  # anti-aliasing (smoothing)
+                    if app.smoothing:
+                        app.smoothing = False
+                    else:
+                        app.smoothing = True
+                    if app.playing == False:
+                        renderFrame()
+                elif c == 'i':  # i - invert
+                    if app.inverted:
+                        app.inverted = False
+                    else:
+                        app.inverted = True
+                    if app.playing == False:
+                        renderFrame()
+                elif c == ' ': # space - pause/resume
+                    if app.playing:
+                        app.playing = False
+                        time.sleep(0.01)
+                        refreshScreen()
+                    elif app.gifstats['framecount'] > 0:
+                        app.playing = True
+                elif c in [98, 'j']:   # left
+                    if not app.playing:
+                        #print("* Working * ",)
+                        #print "* Working * ", 
+                        prevFrame()
+                        renderFrame()
+                elif c in [102, 'k']:   # right
+                    if not app.playing:
+                        nextFrame()
+                        renderFrame()
+                elif c == '<': # < - first frame
+                    if not app.playing:
+                        firstFrame()
+                        renderFrame()
+                elif c == '>': # > - last frame 
+                    if not app.playing:
+                        #print "* Working * ", 
+                        #time.sleep(0.5)
+                        #sys.stdout.write("* Working * ")
+                        lastFrame()
+                        renderFrame()
+                elif c == 'm':  # m - toggle color/monochrome
+                    toggleColor()
+                    if not app.playing:
+                        renderFrame()
+                elif c == 'h':  # H - toggle 256 color
+                    toggleHighColor()
+                    if not app.playing:
+                        renderFrame()
+                elif c in ['?']:  # ? - show help
+                    showHelp()
+                    if not app.playing:
+                        renderFrame()
+                elif c == 'd': # d - toggle display
+                    toggleDisplay()
+                elif c == '-': # - - slower
+                    decreaseFrameDelay()
+                elif c == 'f': # f - toggle fast mode
+                    toggleFastMode()
+                elif c in ['=', '+']: # + - faster
+                    increaseFrameDelay()
+                elif c == 'n': # n - next file
+                    nextFile()
+                elif c == 'p': # p - prev file
+                    prevFile()
+                elif c == 'R': # R - random file
+                    randFile()
+                elif c == 'r': # r - refresh
+                    refreshScreen()
+                #else: print "alksdjflkajsdflkajsdlkfjalkdsjfalksdjflkasdjflkajds " + c
+            time.sleep(0.05)
+
+def toggleFastMode():
+    if app.fastMode:
+        app.fastMode = False
+    else:
+        app.fastMode = True
+        app.sleeptime = 0.0
+
+def increaseFrameDelay():
+    if app.delay < 1.0:
+        app.delay += 0.01
+
+def decreaseFrameDelay():
+    if app.delay > 0.00:
+        app.delay -= 0.01
+    if app.delay < 0.00:
+        app.delay = 0.00
+
+def refreshScreen():
+    clearScreen()
+    if not app.playing:
+        renderFrame()
+
+def toggleColor():
+    if app.colorEnabled:
+        app.colorEnabled = False
+        time.sleep(0.02)
+        sys.stdout.write(Fore.WHITE)
+        sys.stdout.write(Back.BLACK)
+    else:
+        app.colorEnabled = True
+
+def toggleHighColor():
+    if app.hiColorSupported:
+        if app.hiColorEnabled:
+            app.hiColorEnabled = False
+            sys.stdout.write(Back.BLACK)
+        else:
+            app.hiColorEnabled = True
+
+def toggleDisplay():
+    if app.displayInfo:
+        app.displayInfo = False
+        clearScreen()
+        if not app.playing:
+            renderFrame()
+    else:
+        app.displayInfo = True
+        clearScreen()
+        if not app.playing:
+            renderFrame()
+
+def showHelp():
+    isPlaying = app.playing
+    if app.playing:
+        app.playing = False
+        # take this sleep() out once I can call .stop() to the player.. maybe
+        time.sleep(0.2)     # waits for other thread to stop playing
+    print Fore.WHITE
+    print "Help: "
+    print "space - pause/resume"
+    print "d - display info On/Off"
+    print "n - next file"
+    print "p - previous file"
+    print "R - random file"
+    print "c - next character set"
+    print "C - previous character set"
+    print "s - smoothing On/Off"
+    print "i - invert On/Off"
+    print "m - monochrome On/Off"
+    print "h - high-color (256 color) On/Off"
+    print "= or + - increase extra delay"
+    print "- - decrease extra delay"
+    print "f - fast mode (ignore frame delay)"
+    print "b - increase brightness"
+    print "B - decrease brightness"
+    print "U - toggle Utf-8 Encoding"
+    print "r - redraw screen"
+    print "? - show help"
+    print "q - quit"
+    print 
+    print "While paused:"
+    print "k - next frame"
+    print "j - previous frame"
+    print "< - first frame"
+    print "> - last frame"
+    print
+    print "Press any key to continue."
+    while not getch():
+        pass
+    clearScreen()
+    app.playing = isPlaying
+
+#def resumeHandler(signum, frame):
+#    print "resumed"
+#    pass
+
+#def suspendHandler(signum, frame):
+#    print "Suspending.."
+#    pass
+
+
+
+def initDebugShit():
+    try:
+        global dbg
+        import mydebug as dbg
+    except ImportError:
+        return False
+    dbg.listen()
+ 
+if (__name__ == "__main__"):
+    #signal.signal(signal.SIGCONT, resumeHandler)   #
+    #signal.signal(signal.SIGSTP, suspendHandler)   # Unsupported on my python verison, boo :(
+    getch = _Getch()
+    colorama.init()
+    # echo off
+    #print "\033[12h"
+    parser = argparse.ArgumentParser()
+    #parser.add_argument("filenames", nargs='+', help=".gif file or files")
+    parser.add_argument("filenames", nargs='*', help="image file or files to view, or path to images")
+    parser.add_argument("-s", "--smoothing", action="store_true", help="enable smoothing filter (may slow playback)")
+    parser.add_argument("-i", "--inverse", action="store_true", help="invert video")
+    #parser.add_argument("-c", "--charset", nargs=1, type=int, help="Character set to use")
+    parser.add_argument("-A", "--ascii", action="store_true", help="Use IBM-PC extended ASCII block characters (iso-8859-1 encoding)")
+    parser.add_argument("-U", "--utf8", action="store_true", help="Use Unicode block characters (UTF-8 Encoding)")
+    parser.add_argument("-H", "--hicolor", action="store_true", help="Use xterm 256 color mode")
+    parser.add_argument("-m", "--mono", action="store_true", help="Monochrome (no color)")
+    parser.add_argument("-c", "--chars", nargs=1, type=str, help="Custom character set, brightest to dimmest.. eg: --chars=\'Ii; \'")
+    parser.add_argument("-b", "--bright", nargs=1, type=int, help="Set brightness level, eg: --bright=5")
+    parser.add_argument("-o", "--outfile", nargs=1, type=str, help="Output to file")
+    parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    app = AppState()
+    #if os.environ['TERM'] in ["xterm-256color", "screen-256color"]:
+    #    app.hiColorEnabled = True
+    if args.debug:    # moth removal
+        app.debugEnabled = True
+        initDebugShit()
+        print "high color supported: " + str(app.hiColorSupported)
+        print "Encoding: " + app.encodingGuess
+    if args.smoothing:
+        app.smoothing = True
+    if args.inverse:
+        app.inverted = True
+    if args.mono:
+        app.colorEnabled = False
+    if args.outfile:
+        app.outputToFile = True
+        app.outFileName = args.outfile[0]
+        app.outputToTerminal = False
+        app.displayInfo = False
+    if args.ascii:
+        app.disableUnicode()
+        if app.debugEnabled:
+            print "UTF-8 Disabled"
+        app.setCharSet(2)   # ibm-style ascii
+    if args.utf8:
+        app.enableUnicode()
+        if app.debugEnabled:
+            print "UTF-8 Enabled"
+        app.setCharSet(2)  
+    if args.hicolor:
+        app.hiColorEnabled = True
+    if args.chars:
+        if args.bright: # set brightness in character set
+            custCharSet = app.addCharSet(args.chars[0], args.bright[0])
+        else:
+            custCharSet = app.addCharSet(args.chars[0], 10)
+        app.setCharSet(custCharSet)
+    elif args.bright:   # if no custom charset, just set runtime brightness
+        app.delta = args.bright[0]
+    if app.debugEnabled:
+        time.sleep(3)
+    app.running = True
+    if app.outputToTerminal:
+        #usert = threading.Thread(target=inputThread, args=(app,))
+        #usert.setDaemon(True)
+        usert = InputThread(app=app)
+        usert.start()
+    app.oldcwd = os.getcwd()
+    while app.running:
+        #threading.Thread(target = inputThread).start()
+        if len(args.filenames) == 1:
+            if os.path.isdir(args.filenames[0]):    # specified path only
+                os.chdir(args.filenames[0])
+                app.setPwd(args.filenames[0])
+                app.scanForFiles()
+                while app.running:
+                    playGifAscii(app.fileName, app)
+            elif app.outputToFile:
+                playGifAscii(args.filenames[0], app, playtimes = 1)
+                app.running = False
+            else:
+                filepath, filename = os.path.split(args.filenames[0])
+                if filepath != "":  # "" means no path specified
+                    os.chdir(filepath)
+                    app.setPwd(filepath)
+                    if app.debugEnabled:
+                        print "Set path to: " + app.pwd
+                app.fileName = filename
+                if app.debugEnabled:
+                    print "Set filename to: " + app.fileName
+                #app.fileName = args.filenames[0]
+                if app.scanForFiles() == False:
+                    print "Could not open file."
+                    app.running = False
+                while app.running:
+                    playGifAscii(app.fileName, app)
+            app.running = False
+        elif len(args.filenames) > 1:
+            app.setFileList(args.filenames)
+            while app.running:
+                playGifAscii(app.fileName, app, playtimes = 0)
+            #for gifFile in args.filenames:
+                #playGifAscii(gifFile, app, playtimes = 0)
+                #if app.running == False:
+                #    break
+        elif len(args.filenames) < 1:
+            if not app.scanForFiles():
+                print "Could not find any image files in the current path."
+                print "Try specifying a path, filename, or run \"" + sys.argv[0] \
+                    + " -h\""
+                app.running = False
+            while app.running:
+                playGifAscii(app.fileName, app)
+    usert.join()    # kill input thread if rest of the app isn't running
+    # echo on
+    #print "\033[12l"
+    print ""
+    #if (len(sys.argv) > 1):
+    #    playGifAscii(sys.argv[1])
+
+
+
+
+
