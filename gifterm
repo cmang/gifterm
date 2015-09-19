@@ -631,7 +631,7 @@ class AppState():
         #except ImportError:
         #    self.hiColorSupported = False
         if self.platform not in ["Windows", "Linux", "Unix"]:
-            app.platform = "Linux"  # act like OS == Linux if I don't recognize it.
+            self.platform = "Linux"  # act like OS == Linux if I don't recognize it.
         else:
             sys.stdout.write(Fore.WHITE)
             sys.stdout.write(Back.BLACK)
