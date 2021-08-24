@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/env python3
 
 # gifterm
 # by indy joenz
@@ -13,7 +13,11 @@
 # pip install pillow
 # pip install colorama
 
-# it would be cool to refactor all of this into a solid toolkit (classes).
+# For licensing see LICENSE.TXT
+
+# Todo:
+#   Export to file option
+#   Better detect 256 color support?
 
 import argparse, codecs, glob, locale, os, platform, random
 import select, signal, sys, textwrap, threading, time
@@ -47,7 +51,7 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
     app.chars = app.currCharSet[0]
     app.chars = app.chars[::-1]
     app.fileName = inGif
-    print "Loading " + inGif + "... "
+    print("Loading " + inGif + "... ")
     app.gifstats = analyseGif(inGif)
     #if app.gifstats is False:
     #    print "Could not open " + inGif
@@ -57,12 +61,12 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
     try: 
         frame = Image.open(inGif)
     except IOError:
-        print "Could not open " + inGif
+        print("Could not open " + inGif)
         time.sleep(2)
         nextFile()
         return False
     except ValueError:
-        print "Could not open " + inGif
+        print("Could not open " + inGif)
         time.sleep(2)
         nextFile()
         return False
@@ -100,11 +104,11 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
             else:
                 outFile = open(app.outFileName, "a")
         except:
-            print "Could not open file for writing."
+            print("Could not open file for writing.")
             exit(1)
     # start spitting out characters.
     if app.outputToTerminal:
-        print "\033[2J" # clear the screen
+        print("\033[2J") # clear the screen
         #print "Loading " + inGif + "... "
         if app.playing == False:
             renderFrame()
@@ -190,7 +194,7 @@ def firstFrame():
 
 def lastFrame():
     #print "\033[" + str(app.rows) + "," + str(app.cols) + "H", # move to cursor position 0,0
-    print "\033[" + str(app.rows) + "," + "0" + "H", # move to cursor position 0,0
+    print("\033[" + str(app.rows) + "," + "0" + "H", end=' ') # move to cursor position 0,0
     #sys.stdout.write("* Working * ")
     if not (app.frame.tell() == app.gifstats['framecount']):
         newFrameNum = app.gifstats['framecount'] - 1
@@ -329,12 +333,12 @@ def renderFrame(outFile = None):
                 pixcharnum = len(app.chars) - 1    # prevent overflow
             if pixcharnum < 0:
                 pixcharnum = 0
-            pixchar = app.chars[pixcharnum]
+            pixchar = app.chars[int(pixcharnum)]
             try:
                 outstr += pixchar + pixchar
             except UnicodeDecodeError:
                 app.toggleUnicode()
-                pixchar = app.chars[pixcharnum]
+                pixchar = app.chars[int(pixcharnum)]
                 outstr += pixchar + pixchar
             #outstr += app.chars[(pixel * (len(app.chars) + app.delta) / 255) / len(app.chars)]
             # Subtract from app.delta here \/ for dithering.
@@ -369,7 +373,7 @@ def pickHiColor(rgb):
     snaps = (47, 115, 155, 195, 235)
     r, g, b = rgb
     # Using list of snap points, convert RGB value to cube indexes
-    r, g, b = map(lambda x: len(tuple(s for s in snaps if s<x)), (r, g, b))
+    r, g, b = [len(tuple(s for s in snaps if s<x)) for x in (r, g, b)]
     # Simple colorcube transform
     cnum = r*36 + g*6 + b + 16
     code = "\033[38;5;" + str(cnum) + "m"
@@ -645,8 +649,8 @@ class AppState():
             self.charEncoding = 'ASCII'
         time.sleep(3)
     def enableUnicode(self):
-        self.charSets[2] = ((u'\u2588', u'\u2593', u'\u2592', u'\u2591', ' '), 3)
-        self.charSets[3] = ((u'\u2588', u'\u2593', u'\u2592', u'\u2591', ' '), 15)
+        self.charSets[2] = (('\u2588', '\u2593', '\u2592', '\u2591', ' '), 3)
+        self.charSets[3] = (('\u2588', '\u2593', '\u2592', '\u2591', ' '), 15)
         self.unicodeEnabled = True
         self.setCharSet(self.setNum)
     def disableUnicode(self):
@@ -686,6 +690,7 @@ class AppState():
         self.setCharSet(self.setNum)
         self.chars = self.currCharSet[0]
         self.chars = self.chars[::-1]
+
     def scanForFiles(self):
         filelist = []
         # took xpm off of the list because PIL == super buggy with xpm.
@@ -696,8 +701,9 @@ class AppState():
         filelist = sorted(filelist, key=str.lower)
         self.fileList = filelist
         if self.fileName:
-            if app.debugEnabled:    
-                print filelist
+            if self.debugEnabled:    
+                print(filelist)
+                print("Debug Filelist")
             try:
                 self.currentFileIndex = filelist.index(self.fileName)
             except ValueError:
@@ -706,15 +712,22 @@ class AppState():
             return False
         else:
             self.currentFileIndex = 0
-            print str(self.fileList)
+            print(str(self.fileList))
             self.fileName = self.fileList[self.currentFileIndex]
+            return True
+
     def setFileList(self, filelist):
         self.fileList = filelist
         self.currentFileIndex = 0
         self.fileName = self.fileList[self.currentFileIndex]
+
     def setPwd(self, pwd):
         self.pwd = pwd
     
+
+def d_print(debug_string):    # debug print
+    if debugEnabled:
+        print(debug_string)
 
 def resizeHandler(signum, frame):
     clearScreen()
@@ -731,9 +744,9 @@ def resizeHandler(signum, frame):
 
 def clearScreen():
     if app.platform == "Windows":
-        print "\033[2J\033[1;1f"
+        print("\033[2J\033[1;1f")
     else:
-        print "\033[2J" # clear the screen
+        print("\033[2J") # clear the screen
 
 class InputThread(threading.Thread):
 
@@ -920,36 +933,36 @@ def showHelp():
         app.playing = False
         # take this sleep() out once I can call .stop() to the player.. maybe
         time.sleep(0.2)     # waits for other thread to stop playing
-    print Fore.WHITE
-    print "Help: "
-    print "space - pause/resume"
-    print "d - display info On/Off"
-    print "n - next file"
-    print "p - previous file"
-    print "R - random file"
-    print "c - next character set"
-    print "C - previous character set"
-    print "s - smoothing On/Off"
-    print "i - invert On/Off"
-    print "m - monochrome On/Off"
-    print "h - high-color (256 color) On/Off"
-    print "= or + - increase extra delay"
-    print "- - decrease extra delay"
-    print "f - fast mode (ignore frame delay)"
-    print "b - increase brightness"
-    print "B - decrease brightness"
-    print "U - toggle Utf-8 Encoding"
-    print "r - redraw screen"
-    print "? - show help"
-    print "q - quit"
-    print 
-    print "While paused:"
-    print "k - next frame"
-    print "j - previous frame"
-    print "< - first frame"
-    print "> - last frame"
-    print
-    print "Press any key to continue."
+    print(Fore.WHITE)
+    print("Help: ")
+    print("space - pause/resume")
+    print("d - display info On/Off")
+    print("n - next file")
+    print("p - previous file")
+    print("R - random file")
+    print("c - next character set")
+    print("C - previous character set")
+    print("s - smoothing On/Off")
+    print("i - invert On/Off")
+    print("m - monochrome On/Off")
+    print("h - high-color (256 color) On/Off")
+    print("= or + - increase extra delay")
+    print("- - decrease extra delay")
+    print("f - fast mode (ignore frame delay)")
+    print("b - increase brightness")
+    print("B - decrease brightness")
+    print("U - toggle Utf-8 Encoding")
+    print("r - redraw screen")
+    print("? - show help")
+    print("q - quit")
+    print() 
+    print("While paused:")
+    print("k - next frame")
+    print("j - previous frame")
+    print("< - first frame")
+    print("> - last frame")
+    print()
+    print("Press any key to continue.")
     while not getch():
         pass
     clearScreen()
@@ -1001,8 +1014,8 @@ if (__name__ == "__main__"):
     if args.debug:    # moth removal
         app.debugEnabled = True
         initDebugShit()
-        print "high color supported: " + str(app.hiColorSupported)
-        print "Encoding: " + app.encodingGuess
+        print("high color supported: " + str(app.hiColorSupported))
+        print("Encoding: " + app.encodingGuess)
     if args.smoothing:
         app.smoothing = True
     if args.inverse:
@@ -1017,12 +1030,12 @@ if (__name__ == "__main__"):
     if args.ascii:
         app.disableUnicode()
         if app.debugEnabled:
-            print "UTF-8 Disabled"
+            print("UTF-8 Disabled")
         app.setCharSet(2)   # ibm-style ascii
     if args.utf8:
         app.enableUnicode()
         if app.debugEnabled:
-            print "UTF-8 Enabled"
+            print("UTF-8 Enabled")
         app.setCharSet(2)  
     if args.hicolor:
         app.hiColorEnabled = True
@@ -1061,13 +1074,13 @@ if (__name__ == "__main__"):
                     os.chdir(filepath)
                     app.setPwd(filepath)
                     if app.debugEnabled:
-                        print "Set path to: " + app.pwd
+                        print("Set path to: " + app.pwd)
                 app.fileName = filename
                 if app.debugEnabled:
-                    print "Set filename to: " + app.fileName
+                    print("Set filename to: " + app.fileName)
                 #app.fileName = args.filenames[0]
                 if app.scanForFiles() == False:
-                    print "Could not open file."
+                    print("Could not open file.")
                     app.running = False
                 while app.running:
                     playGifAscii(app.fileName, app)
@@ -1082,16 +1095,16 @@ if (__name__ == "__main__"):
                 #    break
         elif len(args.filenames) < 1:
             if not app.scanForFiles():
-                print "Could not find any image files in the current path."
-                print "Try specifying a path, filename, or run \"" + sys.argv[0] \
-                    + " -h\""
+                print("Could not find any image files in the current path.")
+                print("Try specifying a path, filename, or run \"" + sys.argv[0] \
+                    + " -h\"")
                 app.running = False
             while app.running:
                 playGifAscii(app.fileName, app)
     usert.join()    # kill input thread if rest of the app isn't running
     # echo on
     #print "\033[12l"
-    print ""
+    print("")
     #if (len(sys.argv) > 1):
     #    playGifAscii(sys.argv[1])
 
