@@ -4,7 +4,7 @@ This program plays animated GIF files in text terminals, such as a Linux console
 
 ## Requirements
 
-Python 2.x
+Python 3.x
 
 Python modules: Pillow and Colorama (PIL might work if you don't have Pillow)
 
@@ -82,7 +82,7 @@ Other command-line arguments:
                             Output to file
 
 ## Credits/Licensing
-Copyright (c) 2015, Indy Joenz. All rights reserved.
+Copyright (c) 2015,2021 Sam Foster. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
