@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
 # gifterm
-# by indy joenz
+# by Sam Foster
 
-# this thing needs colorama and PIL (or, preferably, Pillow) python modules.
+# this thing needs colorama and PIL (or Pillow) python modules.
 # You can probably install them with: 
 #
 # easy_install pillow
 # easy_install colorama
 #
 # or:
+#
 # pip install pillow
 # pip install colorama
 
@@ -585,8 +586,8 @@ class AppState():
         self.colorEnabled = True
         if self.platform == "Windows":
             self.colorEnabled = False
-        self.hiColorEnabled = False
-        self.hiColorSupported = False
+        self.hiColorEnabled = True
+        self.hiColorSupported = True
         self.unicodeEnabled = False
         self.outputToFile = False
         self.outputToTerminal = True
@@ -627,7 +628,6 @@ class AppState():
         self.mypalette = None
         self.frameNum = None
         self.debugEnabled = False
-        self.hiColorSupported = True
         #try:
         #    global x256
         #    import x256
@@ -1000,8 +1000,10 @@ if (__name__ == "__main__"):
     parser.add_argument("-i", "--inverse", action="store_true", help="invert video")
     #parser.add_argument("-c", "--charset", nargs=1, type=int, help="Character set to use")
     parser.add_argument("-A", "--ascii", action="store_true", help="Use IBM-PC extended ASCII block characters (iso-8859-1 encoding)")
+    parser.add_argument("-B", "--block", action="store_true", help="Use filled block character set")
     parser.add_argument("-U", "--utf8", action="store_true", help="Use Unicode block characters (UTF-8 Encoding)")
-    parser.add_argument("-H", "--hicolor", action="store_true", help="Use xterm 256 color mode")
+    parser.add_argument("-H", "--hicolor", action="store_true", help="Use xterm 256 color mode (Default)")
+    parser.add_argument("-L", "--locolor", action="store_true", help="Use 16 color mode")
     parser.add_argument("-m", "--mono", action="store_true", help="Monochrome (no color)")
     parser.add_argument("-c", "--chars", nargs=1, type=str, help="Custom character set, brightest to dimmest.. eg: --chars=\'Ii; \'")
     parser.add_argument("-b", "--bright", nargs=1, type=int, help="Set brightness level, eg: --bright=5")
@@ -1032,6 +1034,8 @@ if (__name__ == "__main__"):
         if app.debugEnabled:
             print("UTF-8 Disabled")
         app.setCharSet(2)   # ibm-style ascii
+    if args.block:
+        app.setCharSet(3)   # bright blocks (utf-8)
     if args.utf8:
         app.enableUnicode()
         if app.debugEnabled:
@@ -1039,6 +1043,8 @@ if (__name__ == "__main__"):
         app.setCharSet(2)  
     if args.hicolor:
         app.hiColorEnabled = True
+    if args.locolor:
+        app.hiColorEnabled = False
     if args.chars:
         if args.bright: # set brightness in character set
             custCharSet = app.addCharSet(args.chars[0], args.bright[0])
