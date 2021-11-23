@@ -59,31 +59,31 @@ Keyboard commands:
 
 Command-line arguments:
 
-usage: gifterm [-h] [-s] [-i] [-A] [-B] [-U] [-H] [-L] [-m] [-c CHARS] [-b BRIGHT]
-               [-o OUTFILE]
-               [filenames [filenames ...]]
-
-positional arguments:
-  filenames             image file or files to view, or path to images
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -s, --smoothing       enable smoothing filter (may slow playback)
-  -i, --inverse         invert video
-  -A, --ascii           Use IBM-PC extended ASCII block characters (iso-8859-1
-                        encoding)
-  -B, --block           Use filled block character set
-  -U, --utf8            Use Unicode block characters (UTF-8 Encoding)
-  -H, --hicolor         Use xterm 256 color mode (Default)
-  -L, --locolor         Use 16 color mode
-  -m, --mono            Monochrome (no color)
-  -c CHARS, --chars CHARS
-                        Custom character set, brightest to dimmest.. eg:
-                        --chars='Ii; '
-  -b BRIGHT, --bright BRIGHT
-                        Set brightness level, eg: --bright=5
-  -o OUTFILE, --outfile OUTFILE
-                        Output to file
+  usage: gifterm [-h] [-s] [-i] [-A] [-B] [-U] [-H] [-L] [-m] [-c CHARS] [-b BRIGHT]
+                 [-o OUTFILE]
+                 [filenames [filenames ...]]
+   
+  positional arguments:
+    filenames             image file or files to view, or path to images
+   
+  optional arguments:
+    -h, --help            show this help message and exit
+    -s, --smoothing       enable smoothing filter (may slow playback)
+    -i, --inverse         invert video
+    -A, --ascii           Use IBM-PC extended ASCII block characters (iso-8859-1
+                          encoding)
+    -B, --block           Use filled block character set
+    -U, --utf8            Use Unicode block characters (UTF-8 Encoding)
+    -H, --hicolor         Use xterm 256 color mode (Default)
+    -L, --locolor         Use 16 color mode
+    -m, --mono            Monochrome (no color)
+    -c CHARS, --chars CHARS
+                          Custom character set, brightest to dimmest.. eg:
+                          --chars='Ii; '
+    -b BRIGHT, --bright BRIGHT
+                          Set brightness level, eg: --bright=5
+    -o OUTFILE, --outfile OUTFILE
+                          Output to file
 
 ## Credits/Licensing
 
