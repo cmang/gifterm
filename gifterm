@@ -85,7 +85,7 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
         signal.signal(signal.SIGWINCH, resizeHandler)
     except:     # windows
         pass
-    #frame.thumbnail((cols - 1, rows - 1), Image.ANTIALIAS)
+    #frame.thumbnail((cols - 1, rows - 1), Image.LANCZOS)
     #frame = frame.convert('RGB')
     app.mypalette = frame.getpalette()
     #lastframe = frame.convert('RGBA')
@@ -286,9 +286,9 @@ def renderFrame(outFile = None):
         statusBarSize = len(statusBarFormatted) - 1
     if app.smoothing:
         if app.displayInfo:
-            newframe.thumbnail((app.cols, app.rows - statusBarSize), Image.ANTIALIAS)
+            newframe.thumbnail((app.cols, app.rows - statusBarSize), Image.LANCZOS)
         else:
-            newframe.thumbnail((app.cols, app.rows), Image.ANTIALIAS)
+            newframe.thumbnail((app.cols, app.rows), Image.LANCZOS)
     else:
         if app.displayInfo:
             newframe.thumbnail((app.cols, app.rows - statusBarSize), Image.NEAREST)
