@@ -87,7 +87,7 @@ Command-line arguments:
 
 ## Credits/Licensing
 
-Copyright (c) 2015,2021 Sam Foster. All rights reserved.
+Copyright (c) 2015-2024 Sam Foster. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
