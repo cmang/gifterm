@@ -115,6 +115,7 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
             renderFrame()
     if app.outputToFile:
         sys.stdout.write("Writing to " + app.outFileName + " ...\n")
+        app.playing = True
         outFile.write("\033[2J")
     while app.frame:
         while app.playing:
@@ -990,7 +991,8 @@ if (__name__ == "__main__"):
     #signal.signal(signal.SIGCONT, resumeHandler)   #
     #signal.signal(signal.SIGSTP, suspendHandler)   # Unsupported on my python verison, boo :(
     getch = _Getch()
-    colorama.init()
+    usert = None    # thread
+    colorama.init(strip=None)
     # echo off
     #print "\033[12h"
     parser = argparse.ArgumentParser()
@@ -1107,7 +1109,10 @@ if (__name__ == "__main__"):
                 app.running = False
             while app.running:
                 playGifAscii(app.fileName, app)
-    usert.join()    # kill input thread if rest of the app isn't running
+    if usert == None:
+        pass
+    else:
+        usert.join()    # kill input thread if rest of the app isn't running
     # echo on
     #print "\033[12l"
     print("")
