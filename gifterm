@@ -162,6 +162,7 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
                 sys.stdout.write("\nDone.\n")
                 outFile.close()
                 outFile = None
+                time.sleep(2.00)
                 return
         if app.running == False:
             return
@@ -881,6 +882,7 @@ class InputThread(threading.Thread):
                     refreshScreen()
                 elif c == 'w': # w - write to ANSI file
                     writeFilePrompt()
+                    refreshScreen()
                 #else: print "alksdjflkajsdflkajsdlkfjalkdsjfalksdjflkasdjflkajds " + c
             time.sleep(0.05)
 
