@@ -137,8 +137,12 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
                     app.sleeptime = sleeptime
                     time.sleep(sleeptime)
             if app.outputToFile:
-                renderFrame(outFile=outFile)
-                renderFrame(outFile=outFile)
+                try:
+                    renderFrame(outFile=outFile)
+                except UnboundLocalError:
+                    app.playing = False
+                    break
+                #renderFrame(outFile=outFile)
                 percentage = (float(app.frame.tell()) / (app.gifstats['framecount'] - 1))
                 percentage *= 100
                 percentage = int(percentage)
@@ -153,10 +157,11 @@ def playGifAscii(inGif, app, playtimes = 0):   # playtimes is number of times to
                 return
             if (app.playcount == playtimes) and (playtimes != 0):
                 app.playing = False
-                if app.outputToFile and outFile:
-                    sys.stdout.write("\nDone.\n")
-                    outFile.close()
-                    outFile = None
+                return
+            if app.outputToFile and outFile:
+                sys.stdout.write("\nDone.\n")
+                outFile.close()
+                outFile = None
                 return
         if app.running == False:
             return
@@ -874,8 +879,24 @@ class InputThread(threading.Thread):
                     randFile()
                 elif c == 'r': # r - refresh
                     refreshScreen()
+                elif c == 'w': # w - write to ANSI file
+                    writeFilePrompt()
                 #else: print "alksdjflkajsdflkajsdlkfjalkdsjfalksdjflkasdjflkajds " + c
             time.sleep(0.05)
+
+def writeFilePrompt():
+    # Get ready to export
+    app.outputToFile = True
+    app.outFileName = str(app.fileName) + ".ansi"
+    app.outputToTerminal = False
+    app.displayInfo = False
+    # Export
+    playGifAscii(app.fileName, app, playtimes = 1)
+    # Go back to UI
+    app.outputToFile = False
+    app.outputToTerminal = True
+    app.displayInfo = True
+
 
 def toggleFastMode():
     if app.fastMode:
@@ -954,6 +975,7 @@ def showHelp():
     print("B - decrease brightness")
     print("U - toggle Utf-8 Encoding")
     print("r - redraw screen")
+    print("w - write to ANSI file")
     print("? - show help")
     print("q - quit")
     print() 
