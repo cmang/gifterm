@@ -2,7 +2,7 @@
 
 # Gifterm
 
-This program plays animated GIF files in text terminals, such as a Linux console, OS X Terminal or Windows DOS console. It can also view other image files (jpeg, png, bmp, etc).
+This program plays animated GIF files in text terminals, such as a Linux console, OS X Terminal or Windows DOS console. It can also view other image files (jpeg, png, bmp, etc). Images render as ASCII art and/or Unicode art, with various customizability.
 
 ## Requirements
 
