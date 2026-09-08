@@ -20,7 +20,7 @@
 #   Export to file option
 #   Better detect 256 color support?
 
-import argparse, codecs, glob, locale, os, platform, random
+import argparse, codecs, glob, gzip, json, locale, os, platform, random
 import select, signal, sys, textwrap, threading, time
 
 import colorama
@@ -369,8 +369,8 @@ def renderFrame(outFile = None):
     #sys.stdout.write(str((rows, cols)))
     sys.stdout.flush()
 
-def pickHiColor(rgb):
-    """ Converts RGB values to the nearest equivalent xterm-256 color.
+def pickHiColorIndex(rgb):
+    """ Converts RGB values to the nearest equivalent xterm-256 color index (0-255).
         function written by TerrorBite. Heaps faster than x256.py.
     """
     # Default color levels for the color cube
@@ -384,6 +384,13 @@ def pickHiColor(rgb):
     r, g, b = [len(tuple(s for s in snaps if s<x)) for x in (r, g, b)]
     # Simple colorcube transform
     cnum = r*36 + g*6 + b + 16
+    return cnum
+
+def pickHiColor(rgb):
+    """ Converts RGB values to the nearest equivalent xterm-256 color,
+        returned as a colorama/ANSI escape code string.
+    """
+    cnum = pickHiColorIndex(rgb)
     code = "\033[38;5;" + str(cnum) + "m"
     return code
 
@@ -474,6 +481,34 @@ def oldpickLoColor(rgb):
     else:
         return Fore.WHITE
     pass
+
+def pickLoColorIndex(rgb):
+    """ Same color logic as oldpickLoColor(), but returns a Durdraw
+        16-color palette index (1-16, per durformat.md) instead of a
+        colorama ANSI escape code. Used for Dur file export.
+    """
+    r, g, b = rgb
+    if ((r - g) < 5) and ((g - b) < 5) and ((b - g) < 5):
+        if (r > 100):
+            return 16   # bright white
+        else:
+            return 8    # white
+    if (r < 10) and (g > 20) and (b > 20):
+        return 4        # cyan
+    elif (b > g) and (r > g):
+        return 6         # purple
+    elif (r > g) and (g > b):
+        return 7         # yellow/brown
+    elif (r > g) and (r > b):
+        return 5         # red
+    elif (g > b) and (g > r) and (g - b < 10):
+        return 3         # green
+    elif (b > g) and (b > r):
+        return 2         # blue
+    elif (b > g) and (g > r):
+        return 4         # cyan
+    else:
+        return 8         # white
 
 class _Getch:
     """Gets a single character from standard input.  Does not echo to the
@@ -880,16 +915,62 @@ class InputThread(threading.Thread):
                     randFile()
                 elif c == 'r': # r - refresh
                     refreshScreen()
-                elif c == 'w': # w - write to ANSI file
+                elif c == 'w': # w - write to ANSI or Dur file
                     writeFilePrompt()
                     refreshScreen()
                 #else: print "alksdjflkajsdflkajsdlkfjalkdsjfalksdjflkasdjflkajds " + c
             time.sleep(0.05)
 
 def writeFilePrompt():
+    """ Ask the user whether to save the current art as an ANSI file or a
+        Durdraw (.dur) file, then ask for a filename, and write it.
+        Press Esc to cancel.
+    """
+    wasPlaying = app.playing
+    app.playing = False
+    time.sleep(0.05)   # give the playback loop a moment to notice
+    sys.stdout.write(Fore.WHITE)
+    print()
+    print("Write as (a)nsi or (d)ur file? (Esc to cancel)")
+    sys.stdout.flush()
+    choice = getch()
+    if not choice:
+        app.playing = wasPlaying
+        return
+    choice = choice[0]
+    if choice == '\x1b':   # Esc - cancel
+        app.playing = wasPlaying
+        return
+    if choice not in ('a', 'd'):
+        print("Invalid choice.")
+        time.sleep(1)
+        app.playing = wasPlaying
+        return
+    if choice == 'a':
+        defaultName = str(app.fileName) + ".ansi"
+    else:
+        defaultName = str(app.fileName) + ".dur"
+    print("Filename to save as [" + defaultName + "]: ", end='')
+    sys.stdout.flush()
+    try:
+        typedName = input().strip()
+    except (EOFError, KeyboardInterrupt):
+        app.playing = wasPlaying
+        return
+    outFileName = typedName if typedName else defaultName
+    if choice == 'a':
+        writeAnsiFile(outFileName)
+    else:
+        writeDurFile(outFileName)
+    app.playing = wasPlaying
+
+def writeAnsiFile(outFileName):
+    """ Export the current animation to an ANSI text file, playing through
+        it once, using the current character set, colors, brightness, etc.
+    """
     # Get ready to export
     app.outputToFile = True
-    app.outFileName = str(app.fileName) + ".ansi"
+    app.outFileName = outFileName
     app.outputToTerminal = False
     app.displayInfo = False
     # Export
@@ -898,6 +979,130 @@ def writeFilePrompt():
     app.outputToFile = False
     app.outputToTerminal = True
     app.displayInfo = True
+
+def renderFrameToDurData():
+    """ Renders the currently-seeked app.frame using the same pixel
+        processing as renderFrame() (thumbnailing, smoothing, inversion,
+        character mapping, and color picking), but instead of writing
+        ANSI escape codes to the terminal or a file, returns the frame as
+        Durdraw-style data:
+            (contentsLines, colorMapLines)
+        contentsLines is a list of strings (one per row of the frame).
+        colorMapLines is a list of lists of [fg, bg] index pairs, aligned
+        with contentsLines, per the "colorMap" format in durformat.md.
+    """
+    framec = app.frame.copy()
+    framec = framec.convert('RGBA')
+    lastframe = Image.new('RGBA', framec.size)
+    lastframe.paste(framec, (0,0), framec.convert('RGBA'))
+    newframe = Image.new('RGBA', framec.size)
+    if app.gifmode == 'partial':
+        newframe.paste(lastframe, (0,0))
+    newframe.paste(framec, (0,0))
+    if app.smoothing:
+        newframe.thumbnail((app.cols, app.rows), Image.LANCZOS)
+    else:
+        newframe.thumbnail((app.cols, app.rows), Image.NEAREST)
+    rgbframe = newframe.convert('RGB')
+    if app.inverted:
+        rgbframe = ImageOps.invert(rgbframe)
+    pix = rgbframe.load()
+    contentsLines = []
+    colorMapLines = []
+    for y in range(1, newframe.size[1]):
+        lineChars = ''
+        lineColors = []
+        for x in range(1, newframe.size[0]):
+            pixel = sum(pix[x, y])
+            if app.colorEnabled:
+                if app.hiColorEnabled:
+                    fg = pickHiColorIndex(pix[x, y])
+                    bg = 0     # black, 256-color palette
+                else:
+                    fg = pickLoColorIndex(pix[x, y])
+                    bg = 1     # black, 16-color palette
+            else:   # monochrome
+                if app.hiColorEnabled:
+                    fg, bg = 7, 0    # white on black, 256-color palette
+                else:
+                    fg, bg = 8, 1    # white on black, 16-color palette
+            pixcharnum = (pixel * (len(app.chars) + app.delta) / 255) / len(app.chars)
+            if pixcharnum > len(app.chars) - 1:
+                pixcharnum = len(app.chars) - 1    # prevent overflow
+            if pixcharnum < 0:
+                pixcharnum = 0
+            pixchar = app.chars[int(pixcharnum)]
+            # pixchar is doubled, to match renderFrame()'s aspect-correction
+            lineChars += pixchar + pixchar
+            lineColors.append([fg, bg])
+            lineColors.append([fg, bg])
+        contentsLines.append(lineChars)
+        colorMapLines.append(lineColors)
+    return contentsLines, colorMapLines
+
+def writeDurFile(outFileName):
+    """ Export the current image or animation to a Durdraw (.dur) file
+        (gzipped JSON, format version 8 - see durformat.md), using the
+        current character set, brightness, color mode, etc.
+    """
+    sys.stdout.write("Writing to " + outFileName + " ...\n")
+    sys.stdout.flush()
+    framecount = app.gifstats['framecount']
+    if framecount in [0, -1]:
+        framecount = 1
+    savedFrameNum = app.frame.tell()
+    frames = []
+    delays = []
+    for i in range(framecount):
+        app.frame.seek(i)
+        contentsLines, colorMapLines = renderFrameToDurData()
+        #try:
+        #    frameDelay = app.frame.info['duration'] * 0.001
+        #    if frameDelay <= 0.0:
+        #        frameDelay = 0.04
+        #except (KeyError, AttributeError):
+        #    frameDelay = 0.04
+        frameDelay = 0.0
+        delays.append(frameDelay)
+        frames.append({
+            "frameNumber": i + 1,
+            "delay": frameDelay,
+            "contents": contentsLines,
+            "colorMap": colorMapLines,
+        })
+    app.frame.seek(savedFrameNum)   # restore playback position
+    if frames and frames[0]["contents"]:
+        numLines = len(frames[0]["contents"])
+        numCols = len(frames[0]["contents"][0])
+    else:
+        numLines = 0
+        numCols = 0
+    avgDelay = (sum(delays) / len(delays)) if delays else 0.0
+    framerate = round(1.0 / avgDelay, 2) if avgDelay > 0 else 30.0
+    durMovie = {
+        "DurMovie": {
+            "formatVersion": 8,
+            "colorFormat": "256" if app.hiColorEnabled else "16",
+            "preferredFont": "fixed",
+            "encoding": "utf-8" if app.unicodeEnabled else "cp437",
+            "name": os.path.basename(str(app.fileName)),
+            "artist": "",
+            "framerate": framerate,
+            "columns": numCols,
+            "lines": numLines,
+            "extra": None,
+            "frames": frames,
+        }
+    }
+    try:
+        jsonData = json.dumps(durMovie).encode('utf-8')
+        with gzip.open(outFileName, 'wb') as outFile:
+            outFile.write(jsonData)
+        sys.stdout.write("Done.\n")
+    except IOError:
+        sys.stdout.write("Could not open file for writing.\n")
+    sys.stdout.flush()
+    time.sleep(1.0)
 
 
 def toggleFastMode():
@@ -977,7 +1182,7 @@ def showHelp():
     print("B - decrease brightness")
     print("U - toggle Utf-8 Encoding")
     print("r - redraw screen")
-    print("w - write to ANSI file")
+    print("w - write to ANSI or Dur file")
     print("? - show help")
     print("q - quit")
     print() 
