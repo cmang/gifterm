@@ -48,6 +48,7 @@ Keyboard commands:
     B - decrease brightness
     U - toggle Utf-8 Encoding
     r - redraw screen
+    w - write to .ansi or .dur file
     ? - show help
     q - quit
 
