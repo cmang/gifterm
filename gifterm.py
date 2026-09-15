@@ -33,6 +33,8 @@ from colorama import Fore, Back, Style
 from PIL import Image 
 from PIL import ImageOps
 
+GIFTERM_VER = "0.1.0"
+
 class GifAsciiModel:    # Store data and data state here.
     """ Load gif files, provde interface to gif files for controller.
     """
@@ -1346,6 +1348,7 @@ def run():
     parser.add_argument("-c", "--chars", nargs=1, type=str, help="Custom character set, brightest to dimmest.. eg: --chars=\'Ii; \'")
     parser.add_argument("-b", "--bright", nargs=1, type=int, help="Set brightness level, eg: --bright=5")
     parser.add_argument("-o", "--outfile", nargs=1, type=str, help="Output to file")
+    parser.add_argument("-V", "--version", action="store_true", help="Show version information and exit")
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     #if os.environ['TERM'] in ["xterm-256color", "screen-256color"]:
@@ -1371,6 +1374,9 @@ def run():
         if app.debugEnabled:
             print("UTF-8 Disabled")
         app.setCharSet(2)   # ibm-style ascii
+    if args.version:
+        print(GIFTERM_VER)
+        exit(0)
     if args.block:
         app.setCharSet(3)   # bright blocks (utf-8)
     if args.utf8:
