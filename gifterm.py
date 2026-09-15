@@ -3,6 +3,11 @@
 # gifterm
 # by Sam Foster
 
+# uv quick start
+# uv venv init
+# uv pip install pillow colorama
+# uv run gifterm.py
+
 # this thing needs colorama and PIL (or Pillow) python modules.
 # You can probably install them with: 
 #
@@ -20,7 +25,7 @@
 #   Export to file option
 #   Better detect 256 color support?
 
-import argparse, codecs, glob, gzip, json, locale, os, platform, random
+import argparse, atexit, codecs, glob, gzip, json, locale, os, platform, random
 import select, signal, sys, textwrap, threading, time
 
 import colorama
@@ -547,7 +552,23 @@ class _GetchWindows:
 
     def __call__(self):
         import msvcrt
-        return msvcrt.getch()
+        ch = msvcrt.getch()
+        # Arrow/function keys arrive as a two-byte sequence: a prefix byte
+        # (0x00 or 0xE0) followed by a scan code. We don't map those to any
+        # command, but we still need to read the second byte so it isn't
+        # left sitting in the buffer and misread as a keypress next time.
+        if ch in (b'\x00', b'\xe0'):
+            msvcrt.getch()
+            return ''
+        # msvcrt.getch() returns a bytes object, but the rest of the app
+        # (and the Unix implementation below) expects single-character
+        # strings. Without decoding here, every "c == 'q'" style check in
+        # the input thread silently fails on Windows - so nothing, not
+        # even the 'q' quit key, ever does anything.
+        try:
+            return ch.decode('utf-8')
+        except UnicodeDecodeError:
+            return ''
 
 def getTerminalSizeWindows():
     #return 80, 25
@@ -568,6 +589,67 @@ def getTerminalSizeWindows():
     else:
         sizex, sizey = 80, 25   # can't determine actual size, so 80x25 default
     return sizey, sizex
+
+
+def setupWindowsConsole():
+    """ Force UTF-8 in and out on Windows.
+
+    By default, the Windows console (both the legacy Command Prompt and
+    Windows Terminal) talks to a child process using the system's legacy
+    OEM/ANSI code page (437, 850, 1252, etc, depending on locale) unless
+    something tells it otherwise. Unix terminals are essentially always
+    UTF-8 these days, but on Windows the block characters in charSets[2]/[3]
+    (\\u2588 etc) get silently mis-decoded into whatever that legacy code
+    page thinks those bytes mean, which is what shows up as garbage in
+    PowerShell/Windows Terminal and Command Prompt alike - they're both
+    just consoles reading the same (wrong) code page.
+
+    This does two things, both required:
+      1. Switches the console's own output (and input) code page to UTF-8
+         (65001), so bytes written to it are interpreted as UTF-8.
+      2. Reconfigures Python's sys.stdout/stderr to *encode* as UTF-8, since
+         that was likely already fixed/cached at interpreter startup based
+         on whatever code page was active *then* - just changing the
+         console's code page afterwards doesn't retroactively change that.
+
+    Returns the console's original output code page (so it can be restored
+    on exit), or None on non-Windows platforms / if this couldn't be done.
+    """
+    if platform.system() != "Windows":
+        return None    # Unix consoles don't need any of this.
+    original_cp = None
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        original_cp = kernel32.GetConsoleOutputCP()
+        kernel32.SetConsoleOutputCP(65001)   # UTF-8
+        kernel32.SetConsoleCP(65001)         # UTF-8 for input too, for consistency
+    except Exception:
+        pass
+    for streamName in ('stdout', 'stderr'):
+        stream = getattr(sys, streamName)
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except AttributeError:
+            # Python < 3.7 doesn't have TextIOWrapper.reconfigure()
+            import io
+            wrapped = io.TextIOWrapper(stream.buffer, encoding='utf-8',
+                                        errors='replace', newline='')
+            setattr(sys, streamName, wrapped)
+        except Exception:
+            pass    # stream may not be a real console (redirected/piped); leave it alone
+    return original_cp
+
+
+def restoreWindowsConsole(original_cp):
+    """ Put the console's output code page back the way we found it. """
+    if not original_cp:
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleOutputCP(original_cp)
+    except Exception:
+        pass
 
 
 # from BigglesZX - fix for annoying bits with gifs
@@ -626,8 +708,8 @@ class AppState():
         self.inverted = False
         self.displayInfo = False
         self.colorEnabled = True
-        if self.platform == "Windows":
-            self.colorEnabled = False
+        #if self.platform == "Windows":
+        #    self.colorEnabled = False
         self.hiColorEnabled = True
         self.hiColorSupported = True
         self.unicodeEnabled = False
@@ -643,7 +725,7 @@ class AppState():
         self.charSets = {    # tuple (characters, delta)
             0:(('M', 'M', 'X', 'H', '$', 'S', 'I', 'i', ';', ':', ' '), 20),
             1:(('M', 'H', 'S', 'X', 'I', 'i', ';', ':'), 10),
-            2:((chr(219), chr(178), chr(177), chr(176), ' '), 3), # ibm-pc
+            2:((chr(219), chr(178), chr(177), chr(176), ' '), 3), # cp437
             3:((chr(219), chr(178), chr(177), chr(176), ' '), 20),
             4:(('M', 'S', 'I', 'i', ':', ' '), 20),
             5:(('#', '@', '%', ';', '.', ' '), 3)
@@ -682,8 +764,16 @@ class AppState():
             sys.stdout.write(Fore.WHITE)
             sys.stdout.write(Back.BLACK)
         sys.stdout.write(Back.BLACK)
-        self.encodingGuess = locale.getpreferredencoding()
-        if self.encodingGuess in ['UTF-8']:    # can be overridden from command line argument
+        # Don't use locale.getpreferredencoding() to decide this: on
+        # Windows it reports the system's legacy ANSI code page (a Region
+        # Settings option, separate from the console's own code page),
+        # which is usually NOT UTF-8 even when the console genuinely is
+        # (as we've forced it to be, in setupWindowsConsole()). Checking
+        # sys.stdout.encoding directly reflects what will actually be
+        # written to the terminal, on every platform.
+        self.encodingGuess = (getattr(sys.stdout, 'encoding', None)
+                               or locale.getpreferredencoding() or '').upper()
+        if self.encodingGuess in ['UTF-8', 'UTF8']:    # can be overridden from command line argument
             self.enableUnicode()
             self.charEncoding = 'UTF-8'
         else:
@@ -796,6 +886,16 @@ class InputThread(threading.Thread):
         self.app = app
         self._stopevent = threading.Event()
         threading.Thread.__init__(self, name=name)
+        # This thread spends most of its life blocked inside a C-level
+        # blocking read (getch()), waiting for a keypress. If it's a
+        # non-daemon thread, Python will refuse to exit the process until
+        # that blocking call returns - so Ctrl-C (which only interrupts
+        # the main thread) appears to do nothing at all, since the process
+        # just sits there waiting for one more keystroke that quits it.
+        # Making it a daemon thread lets the process exit immediately as
+        # soon as the main thread is done, regardless of what this thread
+        # is blocked on.
+        self.daemon = True
         # echo off
         #print "\033[12h"
 
@@ -1215,12 +1315,17 @@ def initDebugShit():
     except ImportError:
         return False
     dbg.listen()
- 
+
+getch = _Getch()
 if (__name__ == "__main__"):
     #signal.signal(signal.SIGCONT, resumeHandler)   #
     #signal.signal(signal.SIGSTP, suspendHandler)   # Unsupported on my python verison, boo :(
-    getch = _Getch()
     usert = None    # thread
+    # Do this before colorama.init() so colorama wraps our UTF-8-configured
+    # stdout/stderr, rather than the other way around.
+    _origWinConsoleCP = setupWindowsConsole()
+    if _origWinConsoleCP:
+        atexit.register(restoreWindowsConsole, _origWinConsoleCP)
     colorama.init(strip=None)
     # echo off
     #print "\033[12h"
@@ -1230,7 +1335,7 @@ if (__name__ == "__main__"):
     parser.add_argument("-s", "--smoothing", action="store_true", help="enable smoothing filter (may slow playback)")
     parser.add_argument("-i", "--inverse", action="store_true", help="invert video")
     #parser.add_argument("-c", "--charset", nargs=1, type=int, help="Character set to use")
-    parser.add_argument("-A", "--ascii", action="store_true", help="Use IBM-PC extended ASCII block characters (iso-8859-1 encoding)")
+    parser.add_argument("-C", "--cp437", action="store_true", help="Output Code Page 437 (MS-DOS/IBM-PC style) character encoding instead of Utf-8")
     parser.add_argument("-B", "--block", action="store_true", help="Use filled block character set")
     parser.add_argument("-U", "--utf8", action="store_true", help="Use Unicode block characters (UTF-8 Encoding)")
     parser.add_argument("-H", "--hicolor", action="store_true", help="Use xterm 256 color mode (Default)")
@@ -1260,7 +1365,7 @@ if (__name__ == "__main__"):
         app.outFileName = args.outfile[0]
         app.outputToTerminal = False
         app.displayInfo = False
-    if args.ascii:
+    if args.cp437:
         app.disableUnicode()
         if app.debugEnabled:
             print("UTF-8 Disabled")
@@ -1293,55 +1398,65 @@ if (__name__ == "__main__"):
         usert = InputThread(app=app)
         usert.start()
     app.oldcwd = os.getcwd()
-    while app.running:
-        #threading.Thread(target = inputThread).start()
-        if len(args.filenames) == 1:
-            if os.path.isdir(args.filenames[0]):    # specified path only
-                os.chdir(args.filenames[0])
-                app.setPwd(args.filenames[0])
-                app.scanForFiles()
-                while app.running:
-                    playGifAscii(app.fileName, app)
-            elif app.outputToFile:
-                playGifAscii(args.filenames[0], app, playtimes = 1)
-                app.running = False
-            else:
-                filepath, filename = os.path.split(args.filenames[0])
-                if filepath != "":  # "" means no path specified
-                    os.chdir(filepath)
-                    app.setPwd(filepath)
+    try:
+        while app.running:
+            #threading.Thread(target = inputThread).start()
+            if len(args.filenames) == 1:
+                if os.path.isdir(args.filenames[0]):    # specified path only
+                    os.chdir(args.filenames[0])
+                    app.setPwd(args.filenames[0])
+                    app.scanForFiles()
+                    while app.running:
+                        playGifAscii(app.fileName, app)
+                elif app.outputToFile:
+                    playGifAscii(args.filenames[0], app, playtimes = 1)
+                    app.running = False
+                else:
+                    filepath, filename = os.path.split(args.filenames[0])
+                    if filepath != "":  # "" means no path specified
+                        os.chdir(filepath)
+                        app.setPwd(filepath)
+                        if app.debugEnabled:
+                            print("Set path to: " + app.pwd)
+                    app.fileName = filename
                     if app.debugEnabled:
-                        print("Set path to: " + app.pwd)
-                app.fileName = filename
-                if app.debugEnabled:
-                    print("Set filename to: " + app.fileName)
-                #app.fileName = args.filenames[0]
-                if app.scanForFiles() == False:
-                    print("Could not open file.")
+                        print("Set filename to: " + app.fileName)
+                    #app.fileName = args.filenames[0]
+                    if app.scanForFiles() == False:
+                        print("Could not open file.")
+                        app.running = False
+                    while app.running:
+                        playGifAscii(app.fileName, app)
+                app.running = False
+            elif len(args.filenames) > 1:
+                app.setFileList(args.filenames)
+                while app.running:
+                    playGifAscii(app.fileName, app, playtimes = 0)
+                #for gifFile in args.filenames:
+                    #playGifAscii(gifFile, app, playtimes = 0)
+                    #if app.running == False:
+                    #    break
+            elif len(args.filenames) < 1:
+                if not app.scanForFiles():
+                    print("Could not find any image files in the current path.")
+                    print("Try specifying a path, filename, or run \"" + sys.argv[0] \
+                        + " -h\"")
                     app.running = False
                 while app.running:
                     playGifAscii(app.fileName, app)
-            app.running = False
-        elif len(args.filenames) > 1:
-            app.setFileList(args.filenames)
-            while app.running:
-                playGifAscii(app.fileName, app, playtimes = 0)
-            #for gifFile in args.filenames:
-                #playGifAscii(gifFile, app, playtimes = 0)
-                #if app.running == False:
-                #    break
-        elif len(args.filenames) < 1:
-            if not app.scanForFiles():
-                print("Could not find any image files in the current path.")
-                print("Try specifying a path, filename, or run \"" + sys.argv[0] \
-                    + " -h\"")
-                app.running = False
-            while app.running:
-                playGifAscii(app.fileName, app)
+    except KeyboardInterrupt:
+        # Ctrl-C: stop cleanly instead of leaving a stack trace and
+        # (potentially) a background thread still waiting on a keypress.
+        app.running = False
+        print()
     if usert == None:
         pass
     else:
-        usert.join()    # kill input thread if rest of the app isn't running
+        # If we got here via Ctrl-C, the input thread is likely still
+        # blocked inside getch() waiting for a keypress that isn't coming,
+        # so joining without a timeout would hang forever. It's a daemon
+        # thread now, so the process will clean it up on exit regardless.
+        usert.join(timeout=0.5)
     # echo on
     #print "\033[12l"
     print("")
