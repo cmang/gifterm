@@ -4,19 +4,27 @@
 
 This program plays animated GIF files in text terminals, such as a Linux console, OS X Terminal or Windows DOS console. It can also view other image files (jpeg, png, bmp, etc). Images render as ASCII art and/or Unicode art, with various customizability.
 
+## Quick start with uv
+
+If you have "uv" installed, you can run gifterm directly from github, in a folder with .GIF or image files:
+
+```shell
+uv tool run git+https://github.com/cmang/gifterm
+```
+
+Or install it with:
+
+```shell
+uv tool run git+https://github.com/cmang/gifterm
+```
+
+From there type "n" and "p" navigate to the next and previous files, "c" to cycle through character sets, "?" for help and "q" to quit.
+
 ## Requirements
 
 Python 3.x
 
-Python modules: Pillow and Colorama (PIL might work if you don't have Pillow)
-
-You can probably install the modules using your OS package manager, or by running:
-
-    easy_install pillow colorama
-
-or:
-
-    pip install pillow colorama
+Python modules: Pillow and Colorama
 
 ## Usage
 
@@ -88,7 +96,7 @@ Command-line arguments:
 
 ## Credits/Licensing
 
-Copyright (c) 2015-2024 Sam Foster. All rights reserved.
+Copyright (c) 2015-2026 Sam Foster. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
