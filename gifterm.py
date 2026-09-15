@@ -1317,7 +1317,9 @@ def initDebugShit():
     dbg.listen()
 
 getch = _Getch()
-if (__name__ == "__main__"):
+app = AppState()
+
+def run():
     #signal.signal(signal.SIGCONT, resumeHandler)   #
     #signal.signal(signal.SIGSTP, suspendHandler)   # Unsupported on my python verison, boo :(
     usert = None    # thread
@@ -1346,7 +1348,6 @@ if (__name__ == "__main__"):
     parser.add_argument("-o", "--outfile", nargs=1, type=str, help="Output to file")
     parser.add_argument("--debug", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    app = AppState()
     #if os.environ['TERM'] in ["xterm-256color", "screen-256color"]:
     #    app.hiColorEnabled = True
     if args.debug:    # moth removal
@@ -1464,6 +1465,7 @@ if (__name__ == "__main__"):
     #    playGifAscii(sys.argv[1])
 
 
-
+if (__name__ == "__main__"):
+    run()
 
 
