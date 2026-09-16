@@ -3,7 +3,7 @@
 # Gifterm
 0.1.0
 
-This program plays animated GIF files in text terminals, such as a Linux or macOS terminal, Windows Powershell window, etc. It can also show other image files (jpeg, png, bmp, etc). Images render as ASCII art and/or Unicode art, with various customizability.
+This program plays animated GIF files in text terminals, such as a Linux or macOS terminal, Windows Powershell window, etc. It can also show other image files (jpeg, png, bmp, etc). Images render as ASCII art and/or Unicode art, with various customizability. It can export individual frames as Utf-8 256color ANSI files, or full videos as Durdraw .DUR animation files.
 
 ## Quick start with uv
 
