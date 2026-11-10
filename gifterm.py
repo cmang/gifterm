@@ -801,7 +801,7 @@ class AppState():
         self.playTimes = times
     def setCharSet(self, setnum):
         self.currCharSet = self.charSets[setnum]
-        self.chars = self.chars[::-1]
+        self.chars = self.currCharSet[0][::-1]
         self.delta = self.currCharSet[1]
         self.setNum = setnum
     def addCharSet(self, chars, delta):
